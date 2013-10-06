@@ -1,42 +1,36 @@
+from datetime import datetime
 import re
 from selenium import webdriver
 from bs4 import BeautifulSoup
 
-class ProductInfo():
-
-    def __init__(self, name, price, numOwned, totalCPS):
-        self.name = name
-        self.price = price
-        self.numOwned = numOwned
-        self.totalCPS = totalCPS
-
-    def cps(self):
-        return self.totalCPS / self.numOwned
-
-    def marginalBenefit(self):
-        return self.cps() / self.price
-
-    def __str__(self):
-        return "{0} >> CPS: {1}, Owned: {2}, Price: {3}\nMarginal Benefit: {4}".format(self.name, self.cps(), self.numOwned, self.price, self.marginalBenefit())
-
-driver = webdriver.Firefox()
-driver.implicitly_wait(5)
+from product_info import ProductInfo
 
 def run():
+    global driver
+    global filename
+    
+    seed = input('Enter initial game state, or filename (w/ txt extension): ')
+    
+    driver = webdriver.Firefox()
+    driver.implicitly_wait(2)
     driver.get('http://orteil.dashnet.org/cookieclicker')
 
-    html = driver.page_source
-    #updateSave()
-    insertGameStateCookie("MS4wMzc1fHwxMzgwMDczMzM0MjgxfDExMTExMXw3NTE5NTAwMTUwNDkuOTE1NDsxMjg0NTAxNjk4MjIxOS44MjY7MzU1MTk7NjI7MTU0MDcxMTI4MzcyMS43NTAyOzIzNjstMTstMTswOzA7MDswOzA7LTF8MTAwLDEwMyw4ODI1NzUyODczLDA7MTIyLDEyMyw1OTAxNTk5NDg4MSwwOzc1LDEwOSwxMzk2OTM4ODgsMDs4MCwxMDAsNTExOTM0NDc4LDA7NzAsMTAwLDE2MjA3ODM1MDksMDsxMDAsMTAwLDkxNDM1OTE3NzIsMDsxMDAsMTAwLDE5NDUyNDQ0Mjg4LDA7ODgsODgsMjQzMTI0ODk0MTI0LDA7NTAsNTAsOTY3MjI0MDU0ODQyLDA7MzUsMzUsMjY1NDk5NDUyMDMyNiwwO3w0NTAzNTk5NjI3MzQ1OTE5OzQ1MDMxODczMTA1MTAwNzk7MjI1Mjg5OTMyNTMxMTk4MzszOTQwNjUyNDkyNTMyMjIzOzU2MzUwMzQ3MzY2NjcwM3w0NTAzMDQ3ODU4MjkwNjg3OzIyNTIwOTYyOTQyNzA5NzU7MTk%3D%21END%21")
+    if '.txt' in seed:
+        filename = seed
+        insertGameStateCookie()
+    else:
+        filename = 'saves.txt'
+        insertGameStateCookie(seed)
 
     # Refresh
     html = driver.page_source
-
     soup = BeautifulSoup(html)
     
     products = collectProductInfo(soup)
     for product in products:
         print(product)
+
+    prependNewSave()
     
 def collectProductInfo(soup):
     products = []
@@ -46,7 +40,7 @@ def collectProductInfo(soup):
         title = product.find('div', class_='title').string
         price = int(re.sub(',', '', product.find('span', class_='price').string))
         numOwned = int(re.sub(',', '', product.find('div', class_='owned').string))
-        
+                         
         info = soup.find('div', id='rowInfoContent{0}'.format(index))
         cps = ""
         try:
@@ -57,35 +51,90 @@ def collectProductInfo(soup):
             
         pi = ProductInfo(title, price, numOwned, cps)
         products.append(pi)
-
+                         
     return products
 
-def updateSave():
+def updateSave(close=True):
     try:
-        elem = driver.find_element_by_id('prefsButton')
-        elem.click()
+        openMenu()
         
         elem = driver.find_element_by_link_text('Save')
         elem.click()
-    except:
-        # FIX
-        print("oops")
+    except Exception as e:
+        raise Exception("Issue in updateSave --> ", e)
 
-def insertGameStateCookie(cookie):
+    finally:
+        if close:
+            closeMenu()
+
+def prependNewSave():
     try:
-        elem = driver.find_element_by_id('prefsButton')
-        elem.click()
+        updateSave(False)
+
+        cookieStr = driver.get_cookie('CookieClickerGame')['value']
+        
+        temp = None
+        try: 
+            with open(filename, 'r') as f:
+                temp = f.read()
+        except:
+            # No existing file, will be created
+            pass
+
+        utcTS = datetime.utcnow()
+        with open(filename, 'w') as f:
+            f.write('{0} || {1}\n\n'.format(str(utcTS), cookieStr))
+            if temp:
+                f.write(temp)
+        print("save success")
+    except Exception as e:
+        print('Issue in prependNewSave > ' + e)
+
+    finally:
+        closeMenu()
+        
+
+def insertGameStateCookie(seedCookie = None):
+    try:
+        if seedCookie:
+            cookieStr = seedCookie
+        else:
+            f = open(filename, 'r')
+            cookieStr = re.search('(?<= \|\| )[^\s]+', f.readline()).group(0)
+            f.close()
+
+        openMenu()
 
         elem = driver.find_element_by_link_text('Import save')
         elem.click()
 
         alert = driver.switch_to_alert()
-        alert.send_keys(cookie)
+        alert.send_keys(cookieStr)
         alert.accept()
 
-    except:
+    except Exception as e:
         # FIX - this can fail sometimes
-        print("oops in insertCookie")
+        print("oops in insertCookie -->  ", e)
+
+    finally:
+        # Close Menu
+        closeMenu()
+
+def openMenu():
+    if not isMenuOpen():
+        toggleMenu()
+
+def closeMenu():
+    if isMenuOpen():
+        toggleMenu()
+
+def toggleMenu():
+    elem = driver.find_element_by_id('prefsButton')
+    elem.click()
+
+def isMenuOpen():
+    elem = driver.find_element_by_id('menu')
+    return len(elem.text) > 0
 
 run()
 
